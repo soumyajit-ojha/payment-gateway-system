@@ -33,8 +33,22 @@ class StripeProvider(BasePaymentProvider):
             logger.error(f"Stripe Order Creation Failed: {str(e)}")
             raise
 
-    async def verify_webhook(self, payload, headers):
+    async def verify_webhook(self, payload: bytes, headers: dict) -> dict:
         sig_header = headers.get("stripe-signature")
-        return stripe.Webhook.construct_event(
-            payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
-        )
+        try:
+            # This verifies the event came from Stripe
+            event = stripe.Webhook.construct_event(
+                payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
+            )
+            return {
+                "provider_tx_id": event["data"]["object"]["id"],
+                "event_type": event["type"],  # e.g., 'payment_intent.succeeded'
+                "status": (
+                    "SUCCESS"
+                    if event["type"] == "payment_intent.succeeded"
+                    else "FAILED"
+                ),
+                "raw_data": event,
+            }
+        except Exception as e:
+            raise ValueError(f"Stripe signature verification failed: {str(e)}")
