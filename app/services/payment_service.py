@@ -1,48 +1,88 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from fastapi import HTTPException
+from sqlalchemy.future import select
+from fastapi import HTTPException, status
+
 from app.models.transaction import Transaction
-from app.models.enums import PaymentProvider, Currency
-from app.schemas.payment import PaymentInitiate
-from app.providers.stripe_provider import StripeProvider
-from app.providers.razorpay_provider import RazorpayProvider
+from app.models.enums import TransactionStatus
+from app.schemas.payment import PaymentInitiate, PaymentResponse
+from app.providers.factory import PaymentProviderFactory
+from app.core.logging import logger
 
 
 class PaymentService:
-    @staticmethod
-    def get_provider(currency: str, requested_provider: PaymentProvider):
-        # Dynamic Routing Logic
-        if currency == Currency.INR:
-            return RazorpayProvider()
-        return StripeProvider()
+    async def initiate_payment(
+        self, db: AsyncSession, client_id: int, data: PaymentInitiate
+    ) -> PaymentResponse:
+        # 1. Idempotency Check (Database Level)
+        # Check if this idempotency key was already used
+        existing_tx = await self._get_existing_transaction(db, data.idempotency_key)
+        if existing_tx:
+            logger.warning(f"Idempotency hit for key: {data.idempotency_key}")
+            return self._format_response(existing_tx)
 
-    async def initiate(self, db: AsyncSession, client_id: int, data: PaymentInitiate):
-        # 1. Idempotency Check
-        stmt = select(Transaction).where(
-            Transaction.idempotency_key == data.idempotency_key
-        )
-        result = await db.execute(stmt)
-        existing = result.scalar_one_or_none()
-        if existing:
-            return existing
+        # 2. Get Provider Implementation via Factory
+        # If currency is INR, Factory gives Razorpay. Else, Stripe.
+        provider_impl = PaymentProviderFactory.get_provider(data.currency)
 
-        # 2. Select Provider
-        provider_impl = self.get_provider(data.currency, data.provider)
-
-        # 3. Create DB Record (Pending)
-        db_transaction = Transaction(
+        # 3. Create initial record in our DB (Status: PENDING)
+        new_transaction = Transaction(
             client_app_id=client_id,
-            **data.model_dump(exclude={"provider"}),
-            provider=data.provider,
-            status="PENDING"
+            external_order_id=data.external_order_id,
+            external_customer_id=data.external_customer_id,
+            amount=data.amount,
+            currency=data.currency,
+            provider=data.provider,  # Based on routing logic
+            idempotency_key=data.idempotency_key,
+            status=TransactionStatus.PENDING,
         )
-        db.add(db_transaction)
-        await db.flush()  # Get the ID without committing
 
-        # 4. Call External Provider
-        provider_response = await provider_impl.create_order(data)
+        db.add(new_transaction)
+        await db.flush()  # Gets us the ID without committing the whole transaction yet
 
-        # 5. Update with Provider ID and Commit
-        db_transaction.provider_transaction_id = provider_response["id"]
-        await db.commit()
-        return db_transaction
+        try:
+            # 4. Call the External Gateway (Stripe/Razorpay)
+            logger.info(f"Calling provider for order {data.external_order_id}")
+            gateway_data = await provider_impl.create_order(data)
+
+            # 5. Update record with Gateway's ID and Metadata
+            new_transaction.provider_transaction_id = gateway_data[
+                "provider_transaction_id"
+            ]
+            new_transaction.provider_metadata = gateway_data["raw_response"]
+
+            await db.commit()
+            logger.info(
+                f"Payment initiated successfully: {new_transaction.provider_transaction_id}"
+            )
+
+            return self._format_response(
+                new_transaction, gateway_data.get("checkout_url")
+            )
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Failed to initiate payment with provider: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Payment provider communication failed",
+            )
+
+    async def _get_existing_transaction(self, db: AsyncSession, key: str):
+        result = await db.execute(
+            select(Transaction).where(Transaction.idempotency_key == key)
+        )
+        return result.scalar_one_or_none()
+
+    def _format_response(
+        self, tx: Transaction, checkout_url: str = None
+    ) -> PaymentResponse:
+        return PaymentResponse(
+            gateway_transaction_id=tx.id,
+            provider_transaction_id=tx.provider_transaction_id,
+            checkout_url=checkout_url or "https://checkout.internal.com/status",
+            status=tx.status,
+        )
+
+
+# Global instance
+payment_service = PaymentService()

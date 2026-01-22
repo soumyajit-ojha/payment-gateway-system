@@ -7,6 +7,7 @@ from sqlalchemy import text
 from app.db.session import get_db
 from app.core.config import settings
 from app.core.logging import correlation_id, logger, setup_logging
+from app.routers.v1.endpoints import api_router
 
 setup_logging()
 
@@ -43,7 +44,7 @@ async def logging_middleware(request: Request, call_next):
 
 
 # Include our API routes
-# app.include_router(api_router, prefix=settings.API_V1_STR)
+app.include_router(api_router, prefix=settings.API_V1_STR)
 
 
 @app.get("/health")
@@ -52,5 +53,5 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         data = await db.execute(text("SELECT 1"))
         return {"status": "online", "database": "connected"}
     except Exception as e:
-        print(e)
+        # print(e)
         return {"status": "degraded", "database": "disconnected"}

@@ -3,7 +3,7 @@ from sqlalchemy.orm import DeclarativeBase
 from app.core.config import settings
 
 # 1. Create the engine
-print(settings.DATABASE_URL)
+# print(settings.DATABASE_URL)
 engine = create_async_engine(settings.DATABASE_URL)
 
 # 2. Create the Session factory
