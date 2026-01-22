@@ -9,7 +9,7 @@ async def get_current_client(
     x_api_key: str = Header(...), db: AsyncSession = Depends(get_db)
 ):
     stmt = select(ClientApp).where(
-        ClientApp.api_key == x_api_key, ClientApp.is_active == True
+        Clientapp.routers_key == x_api_key, ClientApp.is_active == True
     )
     result = await db.execute(stmt)
     client = result.scalar_one_or_none()

@@ -26,10 +26,10 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: str
 
     # Provider Keys
-    # STRIPE_SECRET_KEY: str
-    # STRIPE_WEBHOOK_SECRET: str
-    # RAZORPAY_KEY_ID: str
-    # RAZORPAY_KEY_SECRET: str
+    STRIPE_SECRET_KEY: str
+    STRIPE_WEBHOOK_SECRET: str
+    RAZORPAY_KEY_ID: str
+    RAZORPAY_KEY_SECRET: str
     # PAYPAL_CLIENT_ID: str
     # PAYPAL_CLIENT_SECRET: str
 
