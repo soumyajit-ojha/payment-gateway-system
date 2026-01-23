@@ -1,41 +1,39 @@
-from fastapi import APIRouter, Request, Header, HTTPException, Depends
+from fastapi import APIRouter, Request, Header, HTTPException, BackgroundTasks
 from app.providers.factory import PaymentProviderFactory
-from app.tasks.payment_tasks import update_transaction_status_task
+from app.services.payment_service import payment_service
 from app.core.logging import logger
 
 router = APIRouter()
 
 
 @router.post("/{provider}")
-async def handle_webhook(provider: str, request: Request):
-    """
-    Unified Webhook Listener.
-    Routes: /api/v1/webhooks/stripe, /api/v1/webhooks/razorpay
-    """
-    # 1. Get raw body and headers
+async def handle_webhook(
+    provider: str, request: Request, background_tasks: BackgroundTasks
+):
+    # 1. Get raw data from Stripe/Razorpay
     payload = await request.body()
     headers = dict(request.headers)
 
-    # 2. Get the correct provider implementation
+    # 2. Get the provider (Stripe or Razorpay)
     try:
-        # Note: We need a slight variation of the factory to get provider by name
         provider_impl = PaymentProviderFactory.get_provider_by_name(provider)
-    except Exception:
-        raise HTTPException(status_code=404, detail="Provider not found")
+    except ValueError as e:
+        logger.error(f"Invalid provider: {str(e)}")
+        raise HTTPException(status_code=400, detail="Invalid provider")
 
-    # 3. Verify the signature
+    # 3. Verify the signature (Security check)
     try:
         verified_data = await provider_impl.verify_webhook(payload, headers)
-    except ValueError as e:
-        logger.error(f"Webhook verification failed for {provider}: {str(e)}")
+    except Exception as e:
+        logger.error(f"Webhook signature mismatch: {str(e)}")
         raise HTTPException(status_code=400, detail="Invalid signature")
 
-    # 4. Offload processing to Celery (Async)
-    # We pass the data to Celery and return 200 OK immediately
-    update_transaction_status_task.delay(
-        provider_tx_id=verified_data["provider_tx_id"],
-        status=verified_data["status"],
-        raw_data=verified_data["raw_data"],
+    # 4. Use FastAPI BackgroundTasks to update DB (No Celery needed!)
+    background_tasks.add_task(
+        payment_service.update_transaction_status,
+        provider_transaction_id=verified_data["provider_tx_id"],
+        new_status=verified_data["status"],
+        metadata=verified_data["raw_data"],
     )
 
-    return {"status": "received"}
+    return {"status": "accepted"}

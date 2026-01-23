@@ -83,6 +83,23 @@ class PaymentService:
             status=tx.status,
         )
 
+    async def update_transaction_status(
+        self, provider_transaction_id: str, new_status: str, metadata: dict
+    ):
+        """This runs in the background to finalize the payment"""
+        # We create a new session because this runs in a background thread
+        async with AsyncSessionLocal() as db:
+            query = (
+                update(Transaction)
+                .where(Transaction.provider_transaction_id == provider_transaction_id)
+                .values(status=new_status, provider_metadata=metadata)
+            )
+            await db.execute(query)
+            await db.commit()
+            logger.info(
+                f"Transaction {provider_transaction_id} updated to {new_status}"
+            )
+
 
 # Global instance
 payment_service = PaymentService()

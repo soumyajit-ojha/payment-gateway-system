@@ -7,7 +7,7 @@ class ClientAppBase(BaseModel):
 
 
 class ClientAppCreate(ClientAppBase):
-    pass  # Used when creating a new app reference
+    name: str  # Used when creating a new app reference
 
 
 class ClientAppRead(ClientAppBase):
@@ -15,3 +15,13 @@ class ClientAppRead(ClientAppBase):
     api_key: str  # The E-commerce app will use this key
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ClientAppResponse(BaseModel):
+    id: int
+    name: str
+    api_key: str
+    is_active: bool
+
+    class Config:
+        from_attributes = True
