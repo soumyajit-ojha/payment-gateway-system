@@ -23,3 +23,19 @@ class BasePaymentProvider(ABC):
         Verifies the webhook signature and returns the parsed event.
         """
         pass
+
+    @abstractmethod
+    async def get_status(self, provider_tx_id: str) -> str:
+        """
+        Fetch current status directly from the Bank/Gateway (Stripe/Razorpay).
+        Used to sync status if a webhook was missed.
+        """
+        pass
+
+    @abstractmethod
+    async def refund(self, provider_tx_id: str, amount: float) -> Dict[str, Any]:
+        """
+        Issue a refund for a specific transaction.
+        Returns a dict containing provider refund details.
+        """
+        pass
