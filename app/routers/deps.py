@@ -14,6 +14,7 @@ async def get_current_client(
     )
     result = await db.execute(query)
     client = result.scalar_one_or_none()
+    # print(client)
 
     if not client:
         raise HTTPException(

@@ -18,6 +18,7 @@ async def register_new_client_app(
     # 1. Protect this endpoint with a master key from .env
     if x_admin_token != settings.SECRET_KEY:
         raise HTTPException(status_code=403, detail="Not authorized to create clients")
+    # print("ADMIN TOKEN MATCHED")
 
     # 2. Generate a unique API Key
     new_api_key = f"pg_{uuid.uuid4().hex}"  # Example: pg_a1b2c3d4...

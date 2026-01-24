@@ -3,8 +3,6 @@ from pydantic import computed_field
 
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "Payment Gateway Service"
-    API_V1_STR: str = "/api/v1"
     SECRET_KEY: str
 
     # DB Configuration
@@ -28,8 +26,8 @@ class Settings(BaseSettings):
     # Provider Keys
     STRIPE_SECRET_KEY: str
     STRIPE_WEBHOOK_SECRET: str
-    RAZORPAY_KEY_ID: str
-    RAZORPAY_KEY_SECRET: str
+    # RAZORPAY_KEY_ID: str
+    # RAZORPAY_KEY_SECRET: str
     # PAYPAL_CLIENT_ID: str
     # PAYPAL_CLIENT_SECRET: str
 

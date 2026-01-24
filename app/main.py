@@ -3,7 +3,8 @@ import uuid
 from fastapi import FastAPI, Request, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-
+from contextlib import asynccontextmanager
+from app.db.session import engine
 from app.db.session import get_db
 from app.core.config import settings
 from app.core.logging import correlation_id, logger, setup_logging
@@ -12,10 +13,28 @@ from app.routers.v1.endpoints import api_router
 setup_logging()
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Application started.")
+    try:
+        async with engine.connect() as conn:
+            logger.info("DB connected successfully.")
+    except Exception as e:
+        logger.error("Error connecting to DB: %s", e)
+
+    yield  # BEFORE: startup, AFTER: shutdown
+    logger.info("Application shut down.")
+
+    # db connection close
+    engine.dispose()
+    logger.info("DB connection closed.")
+
+
 app = FastAPI(
-    title=settings.PROJECT_NAME,
+    title="Payment Gateway Service",
     version="1.0.0",
     description="Unified Payment Gateway Microservice for Internal Apps",
+    lifespan=lifespan,
 )
 
 
@@ -44,7 +63,7 @@ async def logging_middleware(request: Request, call_next):
 
 
 # Include our API routes
-app.include_router(api_router, prefix=settings.API_V1_STR)
+app.include_router(api_router, prefix="/api/v1")
 
 
 @app.get("/health")
