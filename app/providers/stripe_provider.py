@@ -1,5 +1,6 @@
 import stripe
-from fastapi.concurrency import run_in_threadpool
+
+# from fastapi.concurrency import run_in_threadpool
 from app.providers.base import BasePaymentProvider
 from app.core.config import settings
 from app.core.logging import logger
@@ -14,19 +15,16 @@ class StripeProvider(BasePaymentProvider):
             amount_in_cents = int(payment.amount * 100)
 
             # Use run_in_threadpool because the stripe library is synchronous
-            intent = await run_in_threadpool(
-                stripe.PaymentIntent.create,
+            intent = stripe.PaymentIntent.create(
                 amount=amount_in_cents,
                 currency=payment.currency.lower(),
                 metadata={
-                    "external_order_id": payment.external_order_id,
                     "idempotency_key": payment.idempotency_key,
                 },
             )
 
             return {
                 "provider_transaction_id": intent.id,
-                "checkout_url": intent.get("next_action"),  # If using Stripe 3DS
                 "raw_response": intent,
             }
         except Exception as e:
@@ -40,14 +38,15 @@ class StripeProvider(BasePaymentProvider):
             event = stripe.Webhook.construct_event(
                 payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
             )
+            status_mapping = {
+                "payment_intent.succeeded": "SUCCESS",
+                "payment_intent.payment_failed": "FAILED",
+                "payment_intent.canceled": "FAILED",
+            }
+
             return {
                 "provider_tx_id": event["data"]["object"]["id"],
-                "event_type": event["type"],  # e.g., 'payment_intent.succeeded'
-                "status": (
-                    "SUCCESS"
-                    if event["type"] == "payment_intent.succeeded"
-                    else "FAILED"
-                ),
+                "status": status_mapping.get(event["type"], "PENDING"),
                 "raw_data": event,
             }
         except Exception as e:
