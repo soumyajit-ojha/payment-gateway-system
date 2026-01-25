@@ -22,5 +22,7 @@ class PaymentResponse(BaseModel):
 
     gateway_transaction_id: int
     provider_transaction_id: Optional[str] = None
-    checkout_url: str  # The URL where the user will pay
+    client_secret: Optional[str] = (
+        None  # The secret used by client-side to confirm payment
+    )
     status: TransactionStatus

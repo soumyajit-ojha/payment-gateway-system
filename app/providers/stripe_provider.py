@@ -34,6 +34,7 @@ class StripeProvider(BasePaymentProvider):
 
             return {
                 "provider_transaction_id": intent.id,
+                "client_secret": intent.client_secret,
                 "raw_response": intent,
             }
         except stripe.error.StripeError as e:

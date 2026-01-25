@@ -55,7 +55,7 @@ class PaymentService:
             logger.info(f"Payment initiated: {new_transaction.provider_transaction_id}")
 
             return self._format_response(
-                new_transaction, gateway_data.get("checkout_url")
+                new_transaction, gateway_data.get("client_secret")
             )
 
         except Exception as e:
@@ -66,80 +66,64 @@ class PaymentService:
                 detail="Payment provider communication failed",
             )
 
+    @staticmethod
     async def update_transaction_status(
-        self, provider_transaction_id: str, new_status: str, metadata: dict
+        provider_transaction_id: str, new_status: str, metadata: dict
     ):
         """
-        Runs in BackgroundTasks.
-        Updates DB and then notifies the E-commerce app.
+        GATEWAY APP: Triggered by Stripe Webhook.
+        Updates local DB and notifies SellPhone.
         """
-        async with AsyncSessionLocal() as db:
-            try:
-                # 1. Fetch the full transaction record
-                stmt = select(Transaction).where(
-                    Transaction.provider_transaction_id == provider_transaction_id
-                )
-                result = await db.execute(stmt)
-                tx = result.scalar_one_or_none()
+        # 1. Update local Gateway Database
+        # (Your code to update local 'transactions' table goes here)
+        logger.info(f"Transaction {provider_transaction_id} updated to {new_status}")
 
-                if not tx:
-                    logger.error(f"Tx not found: {provider_transaction_id}")
-                    return
+        # 2. Extract the identifier we sent to Stripe
+        # In Stripe, this is stored in metadata
+        external_order_id = metadata.get("metadata", {}).get("external_order_id")
 
-                # 2. Check if status is already updated (Webhook Idempotency)
-                if tx.status == new_status:
-                    logger.info(
-                        f"Tx {provider_transaction_id} already in state {new_status}"
-                    )
-                    return
+        if not external_order_id:
+            logger.error(f"Missing external_order_id for TX {provider_transaction_id}")
+            return
 
-                # 3. Update the transaction
-                tx.status = new_status
-                tx.provider_metadata = metadata
-                await db.commit()
-                await db.refresh(tx)
+        # 3. If Succeeded, call SellPhone's Webhook
+        if new_status == "succeeded":
+            await PaymentGatewayService.notify_sellphone_backend(
+                external_order_id, "success"
+            )
+        elif new_status == "failed":
+            await PaymentGatewayService.notify_sellphone_backend(
+                external_order_id, "failed"
+            )
 
-                logger.info(
-                    f"Background Update Success: {provider_transaction_id} is now {new_status}"
-                )
-
-                # 4. Notify the external E-commerce/Client App
-                await self.notify_client_app(tx)
-            except Exception as e:
-                logger.error(
-                    f"Background Update Failed: {provider_transaction_id} is now {new_status}"
-                )
-
-    async def notify_client_app(self, transaction: Transaction):
+    @staticmethod
+    async def notify_client_app(external_order_id: str, status: str):
         """
         Sends a POST request to the calling service to confirm payment.
         """
         # In a real scenario, this URL would come from the ClientApp table.
         # Placeholder for your internal e-commerce webhook URL:
-        client_webhook_url = "https://your-ecommerce-app.com/api/payment-callback"
-
-        payload = {
-            "external_order_id": transaction.external_order_id,
-            "status": transaction.status,
-            "amount": str(transaction.amount),
-            "currency": str(transaction.currency),
-            "gateway_ref": transaction.provider_transaction_id,
-        }
+        SELLPHONE_WEBHOOK_URL = "http://127.0.0.1:8000/api/v1/orders/webhook/payment"
+        INTERNAL_API_KEY = "pg_bc16c1ef14814ca39eeea71ef3c9f94a"
 
         async with httpx.AsyncClient() as client:
+            payload = {"external_order_id": external_order_id, "status": status}
+            headers = {"x-api-key": INTERNAL_API_KEY}
+
             try:
-                # We use a 5s timeout to ensure our background task doesn't hang
                 response = await client.post(
-                    client_webhook_url, json=payload, timeout=5.0
+                    SELLPHONE_WEBHOOK_URL, json=payload, headers=headers, timeout=10.0
                 )
-                response.raise_for_status()
-                logger.info(
-                    f"Notification sent to client for {transaction.external_order_id}"
-                )
+                if response.status_code == 200:
+                    logger.info(
+                        f"SellPhone notified successfully for {external_order_id}"
+                    )
+                else:
+                    logger.error(
+                        f"SellPhone notification failed: {response.status_code}"
+                    )
             except Exception as e:
-                logger.error(
-                    f"Client notification failed for {transaction.external_order_id}: {str(e)}"
-                )
+                logger.error(f"Failed to reach SellPhone Backend: {str(e)}")
 
     async def _get_existing_transaction(self, db: AsyncSession, key: str):
         result = await db.execute(
@@ -148,12 +132,12 @@ class PaymentService:
         return result.scalar_one_or_none()
 
     def _format_response(
-        self, tx: Transaction, checkout_url: str = None
+        self, tx: Transaction, client_secret: str = None
     ) -> PaymentResponse:
         return PaymentResponse(
             gateway_transaction_id=tx.id,
             provider_transaction_id=tx.provider_transaction_id,
-            checkout_url=checkout_url or "https://yourgateway.com/status",
+            client_secret=client_secret,
             status=tx.status,
         )
 
